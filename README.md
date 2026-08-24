@@ -76,20 +76,25 @@ Measured with `pixi run bench` on an Intel Xeon E5-2697 v4 at 2.30 GHz, Linux
 
 | case | mojo-nevergrad | nevergrad | result |
 | --- | ---: | ---: | ---: |
-| OnePlusOne.ask, 1,000,000d | 44.680 ms | 37.387 ms | 1.20x slower |
-| DE.ask, 100,000d | 5.052 ms | 355.279 ms | 70.33x faster |
-| TwoPointsDE.ask, 100,000d | 6.430 ms | 7.031 ms | 1.09x faster |
-| PSO.ask, 100,000d | 13.369 ms | 16.732 ms | 1.25x faster |
-| DE.minimize sphere, 64d/300 evals | 124.618 ms | 166.298 ms | 1.33x faster |
+| OnePlusOne.ask, 1,000,000d | 38.742 ms | 39.714 ms | 1.03x faster |
+| DE.ask, 100,000d | 3.958 ms | 285.446 ms | 72.11x faster |
+| TwoPointsDE.ask, 100,000d | 4.118 ms | 4.547 ms | 1.10x faster |
+| PSO.ask, 100,000d | 6.904 ms | 10.698 ms | 1.55x faster |
+| DE.minimize sphere, 64d/300 evals | 134.017 ms | 178.481 ms | 1.33x faster |
 
 The large DE gain comes from replacing Nevergrad's Python per-coordinate
 binomial-crossover loop with one fused pass. Two-point DE is a modest win because
-upstream already uses vectorized NumPy slicing. PSO's fused update uses the CPU's
-native `float64` SIMD width with a scalar tail. `OnePlusOne` uses the Mojo scaling
-kernel but is slightly slower than upstream in this measurement because allocation
-and FFI overhead outweigh the simple compiled operation.
+upstream already uses vectorized NumPy slicing; its Mojo update now processes the
+copy and mutation ranges with the CPU's native `float64` SIMD width and scalar
+tails. PSO uses the same SIMD-width strategy. `OnePlusOne` scales the NumPy-owned
+random buffer in place, removing an allocation and copy while keeping the FFI
+boundary zero-copy.
 
-No GPU or multithreaded kernel path is included.
+No GPU or multithreaded kernel path is included. The update kernels perform only
+about 0.06 to 0.2 floating-point operations per byte moved, far below the roughly
+2 flop/byte threshold where transfer and launch overhead can be justified. The
+million-element scaling pass itself takes less than a millisecond, so CPU thread
+launch and synchronization overhead are not warranted either.
 
 Objective-function time is not included in the `ask` rows. For expensive real-world
 objectives, optimizer-update time is usually a small part of the total run.

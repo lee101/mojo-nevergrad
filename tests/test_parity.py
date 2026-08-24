@@ -156,6 +156,17 @@ def test_mojo_scale_kernel_matches_numpy(n):
     np.testing.assert_array_equal(actual, noise * 0.37)
 
 
+@pytest.mark.parametrize("n", [17, 1_000_003])
+def test_mojo_scale_inplace_tail_and_large_buffer(n):
+    rng = np.random.default_rng(12)
+    values = rng.normal(size=n)
+    expected = values * 0.37
+    original_address = values.ctypes.data
+    actual = _lib.scale_inplace(values, 0.37)
+    assert actual.ctypes.data == original_address
+    np.testing.assert_array_equal(actual, expected)
+
+
 def test_mojo_de_binomial_kernel_matches_formula():
     rng = np.random.default_rng(3)
     n = 10_003
@@ -176,6 +187,32 @@ def test_mojo_de_binomial_kernel_matches_formula():
     donor = parent + 0.8 * (first - second) + 0.8 * (best - parent)
     expected = np.where(random > 0.5, parent, donor)
     expected[forced] = donor[forced]
+    np.testing.assert_allclose(actual, expected, rtol=2e-15, atol=2e-15)
+
+
+@pytest.mark.parametrize("n", [7, 17, 10_003])
+@pytest.mark.parametrize("parent_inside", [False, True])
+def test_mojo_de_twopoints_simd_segments_and_tail(n, parent_inside):
+    rng = np.random.default_rng(13)
+    parent, first, second, best = [rng.normal(size=n) for _ in range(4)]
+    lower, upper = 1, n - 2
+    actual = _lib.de_twopoints(
+        parent,
+        first,
+        second,
+        best,
+        0.8,
+        0.8,
+        lower,
+        upper,
+        parent_inside,
+    )
+    donor = parent + 0.8 * (first - second) + 0.8 * (best - parent)
+    keep = np.zeros(n, dtype=bool)
+    keep[lower:upper] = parent_inside
+    keep[:lower] = not parent_inside
+    keep[upper:] = not parent_inside
+    expected = np.where(keep, parent, donor)
     np.testing.assert_allclose(actual, expected, rtol=2e-15, atol=2e-15)
 
 
@@ -227,6 +264,10 @@ def test_ffi_wrappers_reject_unsafe_arrays_and_lengths():
         _lib.scale(good.astype(np.float32), 1.0)
     with pytest.raises(ValueError, match="C-contiguous"):
         _lib.scale(good[::2], 1.0)
+    readonly = good.copy()
+    readonly.flags.writeable = False
+    with pytest.raises(ValueError, match="writeable"):
+        _lib.scale_inplace(readonly, 1.0)
     with pytest.raises(ValueError, match="sizes must match"):
         _lib.de_binomial(good, good, good[:-1], good, good, 0.8, 0.8, 0.5, 0)
     with pytest.raises(ValueError, match="outside size"):

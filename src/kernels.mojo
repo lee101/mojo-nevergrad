@@ -11,19 +11,66 @@ def p(addr: Int) -> Ptr:
     return Ptr(unsafe_from_address=addr)
 
 
+def scale_range(noise: Ptr, dst: Ptr, start: Int, end: Int, sigma: Float64):
+    var scale = SIMD[DType.float64, W](sigma)
+    var i = start
+    while i + W <= end:
+        dst.store(i, noise.load[width=W](i) * scale)
+        i += W
+    while i < end:
+        dst[i] = sigma * noise[i]
+        i += 1
+
+
 @export("mng_scale")
 def mng_scale(noise_addr: Int, dst_addr: Int, n: Int, sigma: Float64) abi("C"):
     if n <= 0:
         return
     var noise = p(noise_addr)
     var dst = p(dst_addr)
-    var scale = SIMD[DType.float64, W](sigma)
-    var i = 0
-    while i + W <= n:
-        dst.store(i, noise.load[width=W](i) * scale)
+
+    scale_range(noise, dst, 0, n, sigma)
+
+
+def copy_range(src: Ptr, dst: Ptr, start: Int, end: Int):
+    var i = start
+    while i + W <= end:
+        dst.store(i, src.load[width=W](i))
         i += W
-    while i < n:
-        dst[i] = sigma * noise[i]
+    while i < end:
+        dst[i] = src[i]
+        i += 1
+
+
+def de_range(
+    parent: Ptr,
+    a: Ptr,
+    b: Ptr,
+    best: Ptr,
+    dst: Ptr,
+    start: Int,
+    end: Int,
+    f1: Float64,
+    f2: Float64,
+):
+    var f1_vec = SIMD[DType.float64, W](f1)
+    var f2_vec = SIMD[DType.float64, W](f2)
+    var i = start
+    while i + W <= end:
+        var parent_vec = parent.load[width=W](i)
+        dst.store(
+            i,
+            parent_vec
+            + f1_vec * (a.load[width=W](i) - b.load[width=W](i))
+            + f2_vec * (best.load[width=W](i) - parent_vec),
+        )
+        i += W
+    while i < end:
+        dst[i] = (
+            parent[i]
+            + f1 * (a[i] - b[i])
+            + f2 * (best[i] - parent[i])
+        )
         i += 1
 
 
@@ -81,19 +128,14 @@ def mng_de_twopoints(
     var b = p(b_addr)
     var best = p(best_addr)
     var dst = p(dst_addr)
-    for i in range(n):
-        var keep_parent = (
-            (parent_inside != 0 and i >= lower and i < upper)
-            or (parent_inside == 0 and (i < lower or i >= upper))
-        )
-        if keep_parent:
-            dst[i] = parent[i]
-        else:
-            dst[i] = (
-                parent[i]
-                + f1 * (a[i] - b[i])
-                + f2 * (best[i] - parent[i])
-            )
+    if parent_inside != 0:
+        de_range(parent, a, b, best, dst, 0, lower, f1, f2)
+        copy_range(parent, dst, lower, upper)
+        de_range(parent, a, b, best, dst, upper, n, f1, f2)
+    else:
+        copy_range(parent, dst, 0, lower)
+        de_range(parent, a, b, best, dst, lower, upper, f1, f2)
+        copy_range(parent, dst, upper, n)
 
 
 @export("mng_pso_update")

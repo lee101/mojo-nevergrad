@@ -9,7 +9,7 @@ import numpy as np
 from nevergrad.optimization import base, utils
 from nevergrad.parametrization import parameter as p
 
-from ._lib import de_binomial, de_twopoints, f64, pso_update, scale
+from ._lib import de_binomial, de_twopoints, f64, pso_update, scale_inplace
 
 IntOrParameter = Union[int, p.Parameter]
 
@@ -31,7 +31,9 @@ class _OnePlusOne(base.Optimizer):
             candidate._meta["sigma"] = self._sigma
             return candidate
         candidate = self.current_bests["pessimistic"].parameter.spawn_child()
-        step = scale(self._rng.normal(0.0, 1.0, self.dimension), self._sigma)
+        step = scale_inplace(
+            self._rng.normal(0.0, 1.0, self.dimension), self._sigma
+        )
         candidate.set_standardized_data(step)
         candidate._meta["sigma"] = self._sigma
         return candidate

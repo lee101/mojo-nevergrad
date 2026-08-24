@@ -142,6 +142,15 @@ def scale(noise: np.ndarray, sigma: float) -> np.ndarray:
     return result
 
 
+def scale_inplace(noise: np.ndarray, sigma: float) -> np.ndarray:
+    noise = _input(noise, "noise")
+    if not noise.flags.writeable:
+        raise ValueError("noise must be writeable")
+    if noise.size:
+        lib().mng_scale(addr(noise), addr(noise), noise.size, sigma)
+    return noise
+
+
 def de_binomial(
     parent: np.ndarray,
     first: np.ndarray,
